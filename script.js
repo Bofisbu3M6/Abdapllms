@@ -117,76 +117,120 @@ function updateDrawerGuest() {
   document.getElementById('nav-login-btn').style.display = 'block';
 }
 
-// -------- HOME --------
+// ============================================================
+//  shop.js — Trang chủ, danh sách sản phẩm, mua hàng
+// ============================================================
+
 async function loadHome() {
   try {
     const products = await apiFetch('/api/products');
     renderProducts(products);
-  } catch(e) {
-    document.getElementById('products-list').innerHTML = '<div class="empty-msg">Không thể tải sản phẩm</div>';
+  } catch (e) {
+    document.getElementById('products-list').innerHTML =
+      '<div class="empty-msg">Không thể tải sản phẩm. Vui lòng thử lại.</div>';
   }
 }
 
 function renderProducts(products) {
   const el = document.getElementById('products-list');
-  if (!products.length) { el.innerHTML = '<div class="empty-msg">Chưa có sản phẩm nào</div>'; return; }
-  el.innerHTML = products.map(p => `
-    <div class="product-card ${p.onSale ? 'sale' : ''}">
-      ${p.onSale ? '<div class="sale-badge"><div class="sale-badge-inner">ĐANG SALE</div></div>' : ''}
-      <div class="product-name">${p.name}</div>
-      <div class="product-price-row">
-        <div class="product-price ${p.onSale ? 'sale-price' : 'normal-price'}">${Number(p.price).toLocaleString('vi-VN')}K</div>
-        ${p.onSale && p.originalPrice ? `<div class="product-orig">${Number(p.originalPrice).toLocaleString('vi-VN')}K</div>` : ''}
+  if (!products || !products.length) {
+    el.innerHTML = '<div class="empty-msg">Chưa có sản phẩm nào</div>';
+    return;
+  }
+
+  el.innerHTML = products.map(p => {
+    const isSale = !!p.onSale;
+    const priceClass = isSale ? 'sale-price' : 'normal-price';
+    const btnClass   = isSale ? 'sale' : 'normal';
+    const btnLabel   = window.State.currentUser
+      ? (isSale ? '🔥 MUA NGAY GÓI SIÊU SALE' : '🛒 MUA ' + p.name.toUpperCase())
+      : '🔐 ĐĂNG NHẬP ĐỂ MUA';
+
+    const origHtml = (isSale && p.originalPrice)
+      ? `<div class="product-orig">${Number(p.originalPrice).toLocaleString('vi-VN')}K</div>`
+      : '';
+
+    const descHtml = p.description
+      ? `<div class="product-desc">${p.description}</div>`
+      : '';
+
+    const featuresHtml = p.features
+      ? `<ul class="product-features">${
+          p.features.split('\n').filter(Boolean).map(f => `<li>${f}</li>`).join('')
+        }</ul>`
+      : '';
+
+    return `
+      <div class="product-card ${isSale ? 'sale' : ''}">
+        ${isSale ? '<div class="sale-badge"><div class="sale-badge-inner">ĐANG SALE</div></div>' : ''}
+        <div class="product-name">${p.name}</div>
+        <div class="product-price-row">
+          <div class="product-price ${priceClass}">${Number(p.price).toLocaleString('vi-VN')}đ</div>
+          ${origHtml}
+        </div>
+        ${descHtml}
+        ${featuresHtml}
+        <button
+          class="btn-buy ${btnClass}"
+          onclick="buyProduct(${p.id}, ${Number(p.price)}, '${escHtml(p.name)}')">
+          ${btnLabel}
+        </button>
       </div>
-      ${p.description ? `<div class="product-desc">${p.description}</div>` : ''}
-      ${p.features ? `<ul class="product-features">${p.features.split('\n').filter(Boolean).map(f=>`<li>${f}</li>`).join('')}</ul>` : ''}
-      <button class="btn-buy ${p.onSale ? 'sale' : 'normal'}" onclick="buyProduct(${p.id}, ${p.price}, '${escHtml(p.name)}', ${JSON.stringify(p.fileUrl)}, ${JSON.stringify(p.fileName)})">
-        ${currentUser ? (p.onSale ? 'MUA NGAY GÓI SIÊU SALE' : 'MUA ' + p.name.toUpperCase()) : 'ĐĂNG NHẬP ĐỂ MUA'}
-      </button>
-    </div>
-  `).join('');
+    `;
+  }).join('');
 }
 
-function escHtml(s) { return (s||'').replace(/'/g,"\\'"); }
+async function buyProduct(id, price, name) {
+  const user = window.State.currentUser;
 
-// Pending purchase state
-let _pendingPurchase = null;
-
-function buyProduct(id, price, name, fileUrl, fileName) {
-  if (!currentUser) { showPage('login'); return; }
-  if (Number(currentUser.balance) < Number(price)) {
-    toast('Số dư không đủ! Vui lòng nạp thêm tiền.', 'error'); return;
+  // Chưa đăng nhập → sang trang login
+  if (!user) {
+    showPage('login');
+    return;
   }
-  _pendingPurchase = { id, price, name, fileUrl, fileName };
-  document.getElementById('purchase-confirm-info').innerHTML =
-    `Sản phẩm: <b style="color:var(--cyan)">${name}</b><br>` +
-    `Số dư hiện tại: <b style="color:var(--white)">${Number(currentUser.balance).toLocaleString('vi-VN')} VND</b><br>` +
-    `Thanh toán: <b style="color:var(--orange)">-${Number(price).toLocaleString('vi-VN')} VND</b><br>` +
-    `Số dư sau khi mua: <b style="color:var(--green)">${(Number(currentUser.balance) - Number(price)).toLocaleString('vi-VN')} VND</b>`;
-  document.getElementById('purchase-confirm-modal').classList.add('open');
-}
 
-async function confirmBuy() {
-  if (!_pendingPurchase) return;
-  const { id, price, name, fileUrl, fileName } = _pendingPurchase;
-  _pendingPurchase = null;
-  const btn = document.getElementById('purchase-confirm-btn');
-  btn.disabled = true; btn.textContent = 'Đang xử lý...';
-  closeModal('purchase-confirm-modal');
+  // Kiểm tra số dư cục bộ trước
+  if (Number(user.balance) < price) {
+    toast('Số dư không đủ! Vui lòng nạp thêm tiền.', 'error');
+    return;
+  }
+
   try {
-    const res = await apiFetch('/api/purchases', { method: 'POST', body: JSON.stringify({ productId: id }) });
-    currentUser.balance = res.balance !== undefined ? res.balance : (Number(currentUser.balance) - Number(price));
-    document.getElementById('drawer-balance').textContent = Number(currentUser.balance).toLocaleString('vi-VN') + ' VND';
-    const info = document.getElementById('purchase-modal-info');
-    info.innerHTML = `Sản phẩm: <b style="color:var(--cyan)">${name}</b><br>Đã trừ: <b style="color:var(--orange)">${Number(price).toLocaleString('vi-VN')} VND</b><br>Số dư còn lại: <b style="color:var(--green)">${Number(currentUser.balance).toLocaleString('vi-VN')} VND</b>`;
+    // Gọi API mua hàng
+    const purchase = await apiFetch('/api/purchases', {
+      method: 'POST',
+      body: JSON.stringify({ productId: id }),
+    });
+
+    // Trừ số dư cục bộ (API không trả về balance mới)
+    const newBalance = Number(user.balance) - price;
+    syncBalance(newBalance);
+
+    // Hiển thị modal thành công
+    document.getElementById('purchase-modal-info').textContent =
+      name + ' — Đã trừ: ' + price.toLocaleString('vi-VN') + ' VND';
+
     const dlBtn = document.getElementById('purchase-dl-btn');
-    if (res.fileUrl) { dlBtn.href = res.fileUrl; dlBtn.download = res.fileName || 'file'; dlBtn.style.display = 'block'; }
-    else dlBtn.style.display = 'none';
+    if (purchase.fileUrl) {
+      dlBtn.href = purchase.fileUrl;
+      dlBtn.download = purchase.fileName || 'file';
+      dlBtn.style.display = 'block';
+    } else {
+      dlBtn.style.display = 'none';
+    }
+
     document.getElementById('purchase-modal').classList.add('open');
-  } catch(e) {
-    toast(e.error || 'Lỗi khi mua hàng', 'error');
+
+    // Reload lại danh sách để cập nhật nút mua
+    loadHome();
+
+  } catch (e) {
+    if (e && e.error === 'Insufficient balance') {
+      toast('Số dư không đủ! Vui lòng nạp thêm tiền.', 'error');
+    } else {
+      toast(e.error || 'Lỗi khi mua hàng, vui lòng thử lại', 'error');
+    }
   }
-  btn.disabled = false; btn.textContent = '✅ XÁC NHẬN THANH TOÁN';
 }
 
 // -------- AUTH --------
